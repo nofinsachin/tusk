@@ -79,3 +79,19 @@ func TestDSNAppliesDefaults(t *testing.T) {
 		t.Errorf("expected default sslmode in DSN: %q", dsn)
 	}
 }
+
+func TestPasswordAvailableFromEnv(t *testing.T) {
+	// Isolate from any ~/.pgpass on the host.
+	t.Setenv("PGPASSFILE", "/nonexistent/tusk-test-pgpass")
+	c := config.Connection{Host: "h", Port: 5432, Database: "d", User: "u"}
+
+	t.Setenv("PGPASSWORD", "")
+	if PasswordAvailable(c) {
+		t.Error("expected no password available with empty PGPASSWORD and no pgpass")
+	}
+
+	t.Setenv("PGPASSWORD", "fromenv")
+	if !PasswordAvailable(c) {
+		t.Error("expected password available when PGPASSWORD is set")
+	}
+}

@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -34,6 +35,16 @@ type managerMode int
 const (
 	modeList managerMode = iota
 	modeForm
+	modePrompt
+)
+
+// pendingAction is what to run after a password prompt is answered.
+type pendingAction int
+
+const (
+	actionNone pendingAction = iota
+	actionTest
+	actionConnect
 )
 
 // --- messages ---
@@ -44,9 +55,12 @@ type testResultMsg struct {
 	err  error
 }
 
-// connectedMsg signals a successful connect request for a connection.
+// connectedMsg signals a successful connect request for a connection. The
+// password (if any was entered at the prompt) is carried along so downstream
+// screens can open a live connection without re-prompting.
 type connectedMsg struct {
-	conn config.Connection
+	conn     config.Connection
+	password string
 }
 
 // manager is the connection-manager screen.
@@ -58,6 +72,11 @@ type manager struct {
 	status string
 	width  int
 	height int
+
+	// password-prompt state
+	pwInput  textinput.Model
+	pwConn   config.Connection
+	pwAction pendingAction
 }
 
 func newManager(store *config.Store) manager {
@@ -73,10 +92,17 @@ func newManager(store *config.Store) manager {
 	l.SetFilteringEnabled(true)
 	l.Styles.Title = titleStyle
 
+	pw := textinput.New()
+	pw.Placeholder = "password"
+	pw.EchoMode = textinput.EchoPassword
+	pw.EchoCharacter = '•'
+	pw.CharLimit = 256
+
 	return manager{
-		store: store,
-		list:  l,
-		mode:  modeList,
+		store:   store,
+		list:    l,
+		mode:    modeList,
+		pwInput: pw,
 	}
 }
 
@@ -104,11 +130,44 @@ func (m *manager) selectedConn() (config.Connection, bool) {
 }
 
 // testCmd runs a connection ping off the UI goroutine.
-func testCmd(c config.Connection) tea.Cmd {
+func testCmd(c config.Connection, password string) tea.Cmd {
 	return func() tea.Msg {
-		err := db.Ping(context.Background(), c, "")
+		err := db.Ping(context.Background(), c, password)
 		return testResultMsg{name: c.Name, err: err}
 	}
+}
+
+// connectCmd emits a connectedMsg carrying the resolved password.
+func connectCmd(c config.Connection, password string) tea.Cmd {
+	return func() tea.Msg {
+		return connectedMsg{conn: c, password: password}
+	}
+}
+
+// startAction either runs the action immediately (when a password is already
+// resolvable via PGPASSWORD/.pgpass, or the connection has no user) or opens
+// the password prompt and defers the action until it is answered.
+func (m *manager) startAction(c config.Connection, action pendingAction) tea.Cmd {
+	needsPrompt := c.User != "" && !db.PasswordAvailable(c)
+	if !needsPrompt {
+		switch action {
+		case actionTest:
+			m.status = "testing " + c.Name + "…"
+			return testCmd(c, "")
+		case actionConnect:
+			return connectCmd(c, "")
+		}
+		return nil
+	}
+
+	// Open the prompt.
+	m.pwConn = c
+	m.pwAction = action
+	m.pwInput.SetValue("")
+	m.pwInput.Focus()
+	m.mode = modePrompt
+	m.status = ""
+	return textinputBlink()
 }
 
 func (m manager) Update(msg tea.Msg) (manager, tea.Cmd) {
@@ -129,6 +188,9 @@ func (m manager) Update(msg tea.Msg) (manager, tea.Cmd) {
 		if m.mode == modeForm {
 			return m.updateForm(msg)
 		}
+		if m.mode == modePrompt {
+			return m.updatePrompt(msg)
+		}
 		return m.updateList(msg)
 	}
 
@@ -136,6 +198,11 @@ func (m manager) Update(msg tea.Msg) (manager, tea.Cmd) {
 	if m.mode == modeForm {
 		var cmd tea.Cmd
 		m.form, _, cmd = m.form.update(msg)
+		return m, cmd
+	}
+	if m.mode == modePrompt {
+		var cmd tea.Cmd
+		m.pwInput, cmd = m.pwInput.Update(msg)
 		return m, cmd
 	}
 	var cmd tea.Cmd
@@ -177,12 +244,13 @@ func (m manager) updateList(msg tea.KeyMsg) (manager, tea.Cmd) {
 		return m, nil
 	case "t":
 		if c, ok := m.selectedConn(); ok {
-			m.status = "testing " + c.Name + "…"
-			return m, testCmd(c)
+			cmd := m.startAction(c, actionTest)
+			return m, cmd
 		}
 	case "enter":
 		if c, ok := m.selectedConn(); ok {
-			return m, func() tea.Msg { return connectedMsg{conn: c} }
+			cmd := m.startAction(c, actionConnect)
+			return m, cmd
 		}
 	}
 
@@ -229,10 +297,57 @@ func (m manager) updateForm(msg tea.KeyMsg) (manager, tea.Cmd) {
 	return m, cmd
 }
 
+// updatePrompt handles keys while the password prompt is active.
+func (m manager) updatePrompt(msg tea.KeyMsg) (manager, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.mode = modeList
+		m.pwAction = actionNone
+		m.pwInput.Blur()
+		m.pwInput.SetValue("")
+		m.status = helpStyle.Render("cancelled")
+		return m, nil
+	case "enter":
+		password := m.pwInput.Value()
+		c := m.pwConn
+		action := m.pwAction
+
+		// Clear prompt state and the in-memory input immediately.
+		m.pwInput.Blur()
+		m.pwInput.SetValue("")
+		m.pwAction = actionNone
+		m.mode = modeList
+
+		switch action {
+		case actionTest:
+			m.status = "testing " + c.Name + "…"
+			return m, testCmd(c, password)
+		case actionConnect:
+			return m, connectCmd(c, password)
+		}
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.pwInput, cmd = m.pwInput.Update(msg)
+	return m, cmd
+}
+
 func (m manager) View() string {
 	if m.mode == modeForm {
-		body := m.form.view()
-		return body
+		return m.form.view()
+	}
+
+	if m.mode == modePrompt {
+		var b strings.Builder
+		b.WriteString(formTitleStyle.Render("Password"))
+		b.WriteString("\n\n")
+		b.WriteString(fmt.Sprintf("Enter password for %s@%s:%d/%s\n\n",
+			m.pwConn.User, m.pwConn.Host, m.pwConn.Port, m.pwConn.Database))
+		b.WriteString(m.pwInput.View())
+		b.WriteString("\n\n")
+		b.WriteString(helpStyle.Render("enter submit · esc cancel"))
+		return b.String()
 	}
 
 	status := m.status

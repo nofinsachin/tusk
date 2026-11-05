@@ -57,7 +57,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		// Global quit only when not capturing text in the form or filtering.
+		// Global quit only when on the list (not capturing text in the form or
+		// password prompt, and not filtering).
 		if m.manager.mode == modeList &&
 			m.manager.list.FilterState().String() != "filtering" {
 			switch msg.String() {

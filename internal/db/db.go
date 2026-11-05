@@ -72,6 +72,19 @@ func Ping(ctx context.Context, c config.Connection, password string) error {
 	return nil
 }
 
+// PasswordAvailable reports whether a password can be resolved for c without
+// prompting — i.e. pgx finds one via PGPASSWORD or ~/.pgpass. It is used to
+// decide whether the UI needs to show a password prompt.
+//
+// It never makes a network connection; it only parses configuration.
+func PasswordAvailable(c config.Connection) bool {
+	cfg, err := pgx.ParseConfig(DSN(c, ""))
+	if err != nil {
+		return false
+	}
+	return cfg.Password != ""
+}
+
 // Connect opens and returns a live connection. The caller owns it and must
 // Close it. Used once we move beyond testing into real browsing/querying.
 func Connect(ctx context.Context, c config.Connection, password string) (*pgx.Conn, error) {
