@@ -26,6 +26,12 @@ A running list of features. Keep adding as ideas come up. Status key:
     left, emphasized key hints on the right, truncated to width (no overflow).
 - [x] **Results grid** — scrollable, virtualized table of query results
   (implemented as part of the query editor; see above).
+- [x] **Metrics** — auto-refreshing (2s) server metrics view, reachable with
+  `m` from the browser.
+  - Storage: database size + top tables by total size (with size bars).
+  - Activity / Load: connection counts, cache hit ratio, and transactions/sec
+    (TPS sampled between refreshes). Note: true host CPU% is not available via
+    SQL, so activity/load proxies are shown in its place.
 - [ ] **Export results** — CSV / JSON.
 
 ## Nice to have (post-MVP)

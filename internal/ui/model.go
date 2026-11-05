@@ -20,6 +20,7 @@ const (
 	screenConnecting
 	screenBrowser
 	screenEditor
+	screenMetrics
 )
 
 // --- lifecycle messages ---
@@ -37,6 +38,11 @@ type Model struct {
 	manager manager
 	browser browser
 	editor  editor
+	metrics metrics
+
+	// metricsGen increments each time the metrics screen is opened so that
+	// ticks/fetches from a previous visit are ignored.
+	metricsGen int
 
 	// conn is the live connection while browsing; nil otherwise.
 	conn     *pgx.Conn
@@ -106,6 +112,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ed, _ := m.editor.Update(msg)
 			m.editor = ed
 		}
+		if m.metrics.initialized {
+			mt, _ := m.metrics.Update(msg)
+			m.metrics = mt
+		}
 		return m, cmd
 
 	case connectedMsg:
@@ -141,6 +151,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case screenEditor:
 		var cmd tea.Cmd
 		m.editor, cmd = m.editor.Update(msg)
+		return m, cmd
+	case screenMetrics:
+		var cmd tea.Cmd
+		m.metrics, cmd = m.metrics.Update(msg)
 		return m, cmd
 	default:
 		var cmd tea.Cmd
@@ -182,8 +196,34 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.screen = screenEditor
 			return m, textareaBlinkCmd()
 		}
+		// 'm' opens the auto-refreshing metrics view.
+		if msg.String() == "m" {
+			m.metricsGen++
+			m.metrics = newMetrics(m.conn, m.connName, m.metricsGen)
+			m.metrics.setSize(m.width, m.height-1)
+			m.screen = screenMetrics
+			return m, m.metrics.init()
+		}
 		var cmd tea.Cmd
 		m.browser, cmd = m.browser.Update(msg)
+		return m, cmd
+
+	case screenMetrics:
+		// esc/b return to the browser (which stops the ticker because ticks of
+		// the current generation are no longer routed). q quits.
+		switch msg.String() {
+		case "esc", "b":
+			m.screen = screenBrowser
+			return m, nil
+		case "q":
+			m.closeConn()
+			return m, tea.Quit
+		case "r":
+			// Manual refresh: issue an immediate fetch for the current gen.
+			return m, fetchMetricsCmd(m.conn, m.metricsGen)
+		}
+		var cmd tea.Cmd
+		m.metrics, cmd = m.metrics.Update(msg)
 		return m, cmd
 
 	case screenEditor:
@@ -243,6 +283,10 @@ func (m Model) View() string {
 	case screenEditor:
 		header := headerStyle.Render("🐘 tusk — " + m.connName + " · query")
 		return lipgloss.JoinVertical(lipgloss.Left, header, m.editor.View())
+
+	case screenMetrics:
+		header := headerStyle.Render("🐘 tusk — " + m.connName + " · metrics")
+		return lipgloss.JoinVertical(lipgloss.Left, header, m.metrics.View())
 
 	default: // screenManager
 		header := headerStyle.Render("🐘 tusk")

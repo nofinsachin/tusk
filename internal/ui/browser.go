@@ -368,7 +368,7 @@ func (b browser) View() string {
 	if b.filtering {
 		help = helpStyle.Render("type to filter · enter keep · esc clear · ↑↓ move · b back")
 	} else {
-		help = helpStyle.Render("↑↓ move · enter/→ expand · ← collapse · / filter · e query · r refresh · b back · q quit")
+		help = helpStyle.Render("↑↓ move · enter/→ expand · ← collapse · / filter · e query · m metrics · r refresh · b back · q quit")
 	}
 	return filterLine + sb.String() + "\n" + help
 }
