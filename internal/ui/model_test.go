@@ -33,7 +33,7 @@ func TestWindowSizeResizesInitializedEditor(t *testing.T) {
 
 	// Create the editor as the connect flow would (no live conn needed here;
 	// setSize/SetWidth only touch the textarea).
-	m.editor = newEditor(nil)
+	m.editor = newEditor(nil, "testconn")
 	m.editor.setSize(m.width, m.height-1)
 	m.screen = screenEditor
 

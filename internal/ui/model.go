@@ -177,7 +177,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		// 'e' opens the query editor on the live connection.
 		if msg.String() == "e" {
-			m.editor = newEditor(m.conn)
+			m.editor = newEditor(m.conn, m.connName)
 			m.editor.setSize(m.width, m.height-1)
 			m.screen = screenEditor
 			return m, textareaBlinkCmd()

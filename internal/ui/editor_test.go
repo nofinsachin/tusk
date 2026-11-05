@@ -38,25 +38,25 @@ func TestResultSummaryCommand(t *testing.T) {
 	}
 }
 
-func TestPad(t *testing.T) {
+func TestTruncCell(t *testing.T) {
 	// Short value is right-padded to width.
-	if got := pad("hi", 5); got != "hi   " {
-		t.Errorf("pad short = %q, want %q", got, "hi   ")
+	if got := truncCell("hi", 5); got != "hi   " {
+		t.Errorf("truncCell short = %q, want %q", got, "hi   ")
 	}
 	// Exact width unchanged.
-	if got := pad("hello", 5); got != "hello" {
-		t.Errorf("pad exact = %q, want %q", got, "hello")
+	if got := truncCell("hello", 5); got != "hello" {
+		t.Errorf("truncCell exact = %q, want %q", got, "hello")
 	}
-	// Overlong is truncated with an ellipsis, preserving total width in runes.
-	got := pad("abcdefgh", 5)
-	if r := []rune(got); len(r) != 5 {
-		t.Errorf("pad long width = %d, want 5 (%q)", len(r), got)
+	// Overlong is truncated with an ellipsis, preserving total display width.
+	got := truncCell("abcdefgh", 5)
+	if w := displayWidth(got); w != 5 {
+		t.Errorf("truncCell long width = %d, want 5 (%q)", w, got)
 	}
 	if !strings.HasSuffix(got, "…") {
-		t.Errorf("pad long should end with ellipsis: %q", got)
+		t.Errorf("truncCell long should end with ellipsis: %q", got)
 	}
 	// Newlines/tabs collapsed to spaces.
-	if got := pad("a\nb", 3); strings.ContainsAny(got, "\n\t") {
-		t.Errorf("pad should strip newlines/tabs: %q", got)
+	if got := truncCell("a\nb", 3); strings.ContainsAny(got, "\n\t") {
+		t.Errorf("truncCell should strip newlines/tabs: %q", got)
 	}
 }

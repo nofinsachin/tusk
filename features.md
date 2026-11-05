@@ -19,7 +19,13 @@ A running list of features. Keep adding as ideas come up. Status key:
   `e`; `tab` switches editor/results panes; shows a basic scrollable results
   table, command tag for non-SELECTs, timing, and errors. A richer grid is the
   next item.
-- [ ] **Results grid** — scrollable, virtualized table of query results.
+  - [x] Richer results grid: auto column widths (capped at 40 with ellipsis),
+    row-number gutter, header divider, column separators, a highlighted row
+    cursor, distinct NULL styling, virtualized rows & columns.
+  - [x] Styled, width-safe footer bar: connection name + row position on the
+    left, emphasized key hints on the right, truncated to width (no overflow).
+- [x] **Results grid** — scrollable, virtualized table of query results
+  (implemented as part of the query editor; see above).
 - [ ] **Export results** — CSV / JSON.
 
 ## Nice to have (post-MVP)
