@@ -141,6 +141,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch m.screen {
 	case screenBrowser:
+		// While the filter input is focused, the browser owns all keys
+		// (including 'b' and 'q' as literal text).
+		if m.browser.filtering && m.browser.filterInput.Focused() {
+			var cmd tea.Cmd
+			m.browser, cmd = m.browser.Update(msg)
+			return m, cmd
+		}
 		// 'b' returns to the connection manager, closing the connection.
 		if msg.String() == "b" {
 			m.closeConn()

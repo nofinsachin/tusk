@@ -12,6 +12,8 @@ A running list of features. Keep adding as ideas come up. Status key:
 - [x] **Schema browser** — collapsible tree of schemas → tables/views → columns.
   - Lazy-loads children; columns show type and nullability.
   - Keyboard nav; `r` refresh, `b` back to connections.
+  - [x] Fuzzy text search (`/`) over loaded schema & table/view names
+    (no columns); auto-shows schemas with matching children; `esc` clears.
 - [ ] **Query editor** — multi-line SQL input with run (Ctrl+Enter).
 - [ ] **Results grid** — scrollable, virtualized table of query results.
 - [ ] **Export results** — CSV / JSON.

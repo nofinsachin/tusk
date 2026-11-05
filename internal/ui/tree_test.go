@@ -76,6 +76,92 @@ func TestColumnLabelShowsNullability(t *testing.T) {
 	}
 }
 
+func TestFilterEmptyPatternIsFullTree(t *testing.T) {
+	roots := schemaNodes([]db.Schema{{Name: "public"}, {Name: "app"}})
+	roots[0].expanded = true
+	roots[0].children = relationNodes([]db.Relation{
+		{Schema: "public", Name: "users", Kind: db.RelTable},
+	})
+
+	got := filterRows(roots, "")
+	want := flatten(roots)
+	if len(got) != len(want) {
+		t.Fatalf("empty filter rows = %d, flatten = %d", len(got), len(want))
+	}
+}
+
+func TestFilterMatchesSchemaName(t *testing.T) {
+	roots := schemaNodes([]db.Schema{{Name: "public"}, {Name: "analytics"}})
+	roots[1].children = relationNodes([]db.Relation{
+		{Schema: "analytics", Name: "events", Kind: db.RelTable},
+		{Schema: "analytics", Name: "sessions", Kind: db.RelTable},
+	})
+
+	rows := filterRows(roots, "analy")
+	if len(rows) != 3 {
+		t.Fatalf("got %d rows, want 3 (analytics + 2 tables): %+v", len(rows), labels(rows))
+	}
+	if rows[0].n.label != "analytics" {
+		t.Errorf("first row = %q, want analytics", rows[0].n.label)
+	}
+	if rows[1].depth != 1 {
+		t.Errorf("child depth = %d, want 1", rows[1].depth)
+	}
+}
+
+func TestFilterMatchesRelationChildOnly(t *testing.T) {
+	roots := schemaNodes([]db.Schema{{Name: "public"}})
+	roots[0].children = relationNodes([]db.Relation{
+		{Schema: "public", Name: "users", Kind: db.RelTable},
+		{Schema: "public", Name: "orders", Kind: db.RelTable},
+		{Schema: "public", Name: "invoices", Kind: db.RelView},
+	})
+
+	rows := filterRows(roots, "order")
+	if len(rows) != 2 {
+		t.Fatalf("got %d rows, want 2 (public + orders): %+v", len(rows), labels(rows))
+	}
+	if rows[0].n.label != "public" {
+		t.Errorf("first row = %q, want public", rows[0].n.label)
+	}
+	if rows[1].n.label != "orders" {
+		t.Errorf("matching child = %q, want orders", rows[1].n.label)
+	}
+}
+
+func TestFilterNeverMatchesColumns(t *testing.T) {
+	roots := schemaNodes([]db.Schema{{Name: "public"}})
+	rel := relationNodes([]db.Relation{{Schema: "public", Name: "users", Kind: db.RelTable}})
+	roots[0].children = rel
+	rel[0].children = columnNodes([]db.Column{
+		{Name: "email", DataType: "text", Nullable: true},
+	})
+
+	rows := filterRows(roots, "email")
+	if len(rows) != 0 {
+		t.Fatalf("got %d rows, want 0 (columns out of scope): %+v", len(rows), labels(rows))
+	}
+}
+
+func TestFilterNoMatch(t *testing.T) {
+	roots := schemaNodes([]db.Schema{{Name: "public"}})
+	roots[0].children = relationNodes([]db.Relation{
+		{Schema: "public", Name: "users", Kind: db.RelTable},
+	})
+	rows := filterRows(roots, "zzzzz")
+	if len(rows) != 0 {
+		t.Errorf("got %d rows, want 0", len(rows))
+	}
+}
+
+func labels(rows []visibleRow) []string {
+	out := make([]string, len(rows))
+	for i, r := range rows {
+		out[i] = r.n.label
+	}
+	return out
+}
+
 func TestIconAndChildren(t *testing.T) {
 	schema := &node{kind: nodeSchema}
 	if !schema.hasChildren() {

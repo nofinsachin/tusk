@@ -3,6 +3,8 @@ package ui
 import (
 	"fmt"
 
+	"github.com/sahilm/fuzzy"
+
 	"github.com/nofinsachin/tusk/internal/db"
 )
 
@@ -58,6 +60,72 @@ func flatten(roots []*node) []visibleRow {
 		}
 	}
 	walk(roots, 0)
+	return out
+}
+
+// fuzzyMatch reports whether pattern fuzzily matches s (case-insensitive).
+// An empty pattern matches everything.
+func fuzzyMatch(pattern, s string) bool {
+	if pattern == "" {
+		return true
+	}
+	return len(fuzzy.Find(pattern, []string{s})) > 0
+}
+
+// filterRows returns the visible rows when a fuzzy filter is active.
+//
+// Scope (by design): only schemas and relations are considered; columns are
+// never matched and are omitted from filtered output. A schema is shown if its
+// own name matches, or if any of its (already-loaded) relation children match.
+// When a schema is shown only because of matching children, those matching
+// children are shown beneath it (the schema is treated as expanded for display
+// purposes, without mutating the node's real expanded state).
+//
+// It is pure: it does not mutate the tree. An empty pattern yields the normal
+// unfiltered, expansion-respecting flatten.
+func filterRows(roots []*node, pattern string) []visibleRow {
+	if pattern == "" {
+		return flatten(roots)
+	}
+
+	var out []visibleRow
+	for _, schema := range roots {
+		if schema.kind != nodeSchema {
+			continue
+		}
+		schemaMatches := fuzzyMatch(pattern, schema.label)
+
+		// Collect matching relation children.
+		var matchingRels []*node
+		for _, child := range schema.children {
+			if child.kind != nodeRelation {
+				continue
+			}
+			if fuzzyMatch(pattern, child.label) {
+				matchingRels = append(matchingRels, child)
+			}
+		}
+
+		if !schemaMatches && len(matchingRels) == 0 {
+			continue
+		}
+
+		out = append(out, visibleRow{n: schema, depth: 0})
+
+		// Show children: if the schema itself matched, show all its relation
+		// children; otherwise show only the ones that matched.
+		if schemaMatches {
+			for _, child := range schema.children {
+				if child.kind == nodeRelation {
+					out = append(out, visibleRow{n: child, depth: 1})
+				}
+			}
+		} else {
+			for _, child := range matchingRels {
+				out = append(out, visibleRow{n: child, depth: 1})
+			}
+		}
+	}
 	return out
 }
 
