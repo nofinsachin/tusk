@@ -36,6 +36,8 @@ type columnsLoadedMsg struct {
 
 // browser is the schema-browser screen.
 type browser struct {
+	initialized bool
+
 	conn     *pgx.Conn
 	connName string
 
@@ -60,6 +62,7 @@ func newBrowser(conn *pgx.Conn, connName string) browser {
 	fi.CharLimit = 128
 
 	return browser{
+		initialized: true,
 		conn:        conn,
 		connName:    connName,
 		loading:     true,

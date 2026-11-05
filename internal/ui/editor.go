@@ -38,6 +38,8 @@ const (
 
 // editor is the SQL query-editor screen.
 type editor struct {
+	initialized bool
+
 	conn  *pgx.Conn
 	area  textarea.Model
 	focus editorFocus
@@ -62,9 +64,10 @@ func newEditor(conn *pgx.Conn) editor {
 	ta.CharLimit = 0 // unlimited
 
 	return editor{
-		conn:  conn,
-		area:  ta,
-		focus: focusEditor,
+		initialized: true,
+		conn:        conn,
+		area:        ta,
+		focus:       focusEditor,
 	}
 }
 

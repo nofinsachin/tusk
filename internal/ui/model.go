@@ -90,13 +90,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.ready = true
-		// Propagate to whichever screens exist.
+		// The manager always exists. The browser and editor are created
+		// lazily (on connect and on opening the editor) and are sized at
+		// creation time from m.width/m.height, so only forward live resize
+		// events to them once they have been initialized. Forwarding to an
+		// uninitialized editor would call textarea.SetWidth on a zero-value
+		// textarea.Model and panic.
 		var cmd tea.Cmd
 		m.manager, cmd = m.manager.Update(msg)
-		b, _ := m.browser.Update(msg)
-		m.browser = b
-		ed, _ := m.editor.Update(msg)
-		m.editor = ed
+		if m.browser.initialized {
+			b, _ := m.browser.Update(msg)
+			m.browser = b
+		}
+		if m.editor.initialized {
+			ed, _ := m.editor.Update(msg)
+			m.editor = ed
+		}
 		return m, cmd
 
 	case connectedMsg:
