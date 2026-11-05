@@ -13,6 +13,15 @@ and view results — all without leaving the keyboard.
 - **Clean**: uncluttered, focused layout.
 - **Keyboard-driven**: everything reachable without a mouse.
 
+## Vision
+
+Beyond a laptop TUI, tusk aims to be a **cloud-native Postgres client**: a
+single static binary small enough to run as a container next to a Postgres
+cluster, with a dual interactive/headless mode and a security-first posture. It
+targets orchestrator-agnostic primitives (env vars, mounted secrets, DNS, TTY
+detection, structured output) rather than any specific platform. See
+[DESIGN.md](DESIGN.md) for the full vision and principles.
+
 ## Status
 
 Early development. Current milestone: MVP.
