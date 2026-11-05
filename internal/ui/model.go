@@ -228,8 +228,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case screenEditor:
 		// esc returns to the browser; the editor owns every other key
-		// (including 'q'/'b' which are valid SQL text).
-		if msg.String() == "esc" {
+		// (including 'q'/'b' which are valid SQL text). While the export
+		// prompt is open, esc is delegated to the editor so it cancels the
+		// prompt rather than leaving the screen.
+		if msg.String() == "esc" && !m.editor.exporting {
 			m.screen = screenBrowser
 			return m, nil
 		}

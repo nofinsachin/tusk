@@ -32,7 +32,25 @@ A running list of features. Keep adding as ideas come up. Status key:
   - Activity / Load: connection counts, cache hit ratio, and transactions/sec
     (TPS sampled between refreshes). Note: true host CPU% is not available via
     SQL, so activity/load proxies are shown in its place.
-- [ ] **Export results** — CSV / JSON.
+- [x] **Export results** — CSV / JSON via reusable `db.Export` serializers
+  (`io.Writer`-based, shared by the future headless `--format` mode). In the
+  query editor, `ctrl+e` opens an export prompt (`ctrl+t` toggles csv/json,
+  default timestamped filename); SQL NULL is faithfully distinguished from the
+  literal string "NULL" (JSON null / empty CSV field).
+
+## Cloud-native (see DESIGN.md)
+
+Orchestrator-agnostic — target 12-factor primitives, not Kubernetes specifics.
+
+- [ ] **`DATABASE_URL` / `PG*` env as a connection source** (preferred over
+  stored YAML; passwords still never stored).
+- [ ] **Headless / dual mode** — `tusk --dsn ... -c "SQL" --format csv|json|table`,
+  auto-selected when stdout is not a TTY; sane exit codes.
+- [ ] **Container image** — distroless/scratch, non-root, static binary, SBOM.
+- [ ] **Read-only mode** — opt-in; use read-only transactions so a session
+  cannot mutate data (compliance-sensitive access).
+- [ ] **Session audit log** — structured who/when/what-SQL log suitable for
+  shipping to a central system.
 
 ## Nice to have (post-MVP)
 

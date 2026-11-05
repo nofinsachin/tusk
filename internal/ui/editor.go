@@ -3,10 +3,13 @@ package ui
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jackc/pgx/v5"
@@ -55,6 +58,12 @@ type editor struct {
 	rowOff int
 	colOff int
 
+	// export prompt state
+	exporting  bool
+	exportFmt  db.ExportFormat
+	exportPath textinput.Model
+	exportMsg  string // transient status after an export attempt
+
 	width  int
 	height int
 }
@@ -66,12 +75,18 @@ func newEditor(conn *pgx.Conn, connName string) editor {
 	ta.ShowLineNumbers = true
 	ta.CharLimit = 0 // unlimited
 
+	pathIn := textinput.New()
+	pathIn.Placeholder = "path to write"
+	pathIn.CharLimit = 1024
+
 	return editor{
 		initialized: true,
 		conn:        conn,
 		connName:    connName,
 		area:        ta,
 		focus:       focusEditor,
+		exportFmt:   db.FormatCSV,
+		exportPath:  pathIn,
 	}
 }
 
@@ -95,6 +110,78 @@ func runCmd(conn *pgx.Conn, sql string) tea.Cmd {
 		res, err := db.RunQuery(ctx, conn, sql)
 		return queryResultMsg{res: res, err: err}
 	}
+}
+
+// defaultExportName builds a timestamped default filename for the format.
+func defaultExportName(format db.ExportFormat) string {
+	return fmt.Sprintf("tusk-export-%s.%s", time.Now().Format("20060102-150405"), format)
+}
+
+// openExport starts the export prompt if there is a row set to export.
+func (e *editor) openExport() {
+	if e.res == nil || !e.res.IsRowSet() {
+		e.exportMsg = "nothing to export"
+		return
+	}
+	e.exporting = true
+	e.exportMsg = ""
+	e.exportPath.SetValue(defaultExportName(e.exportFmt))
+	e.exportPath.Focus()
+}
+
+// toggleExportFormat switches csv<->json and updates the default filename if
+// the user hasn't customized it.
+func (e *editor) toggleExportFormat() {
+	prevDefaultName := defaultExportName(e.exportFmt)
+	if e.exportFmt == db.FormatCSV {
+		e.exportFmt = db.FormatJSON
+	} else {
+		e.exportFmt = db.FormatCSV
+	}
+	// Only rewrite the path if it still looks like a default (same stem).
+	cur := e.exportPath.Value()
+	if cur == "" || cur == prevDefaultName || strings.HasSuffix(cur, ".csv") || strings.HasSuffix(cur, ".json") {
+		base := strings.TrimSuffix(strings.TrimSuffix(cur, ".csv"), ".json")
+		if base == "" || cur == prevDefaultName {
+			e.exportPath.SetValue(defaultExportName(e.exportFmt))
+		} else {
+			e.exportPath.SetValue(base + "." + string(e.exportFmt))
+		}
+	}
+}
+
+// performExport writes the current result to the chosen path. Returns a status
+// string for the UI (success or error). It never overwrites silently beyond
+// what the user typed; the path is used verbatim.
+func (e *editor) performExport() string {
+	path := strings.TrimSpace(e.exportPath.Value())
+	if path == "" {
+		return "✗ export: path is required"
+	}
+	if e.res == nil || !e.res.IsRowSet() {
+		return "✗ export: nothing to export"
+	}
+
+	// Create parent directories if the user included a path.
+	if dir := filepath.Dir(path); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "✗ export: " + err.Error()
+		}
+	}
+
+	f, err := os.Create(path)
+	if err != nil {
+		return "✗ export: " + err.Error()
+	}
+	defer f.Close()
+
+	if err := db.Export(f, *e.res, e.exportFmt); err != nil {
+		return "✗ export: " + err.Error()
+	}
+	if err := f.Close(); err != nil {
+		return "✗ export: " + err.Error()
+	}
+	return fmt.Sprintf("✓ exported %d row(s) to %s", len(e.res.Rows), path)
 }
 
 func (e editor) Update(msg tea.Msg) (editor, tea.Cmd) {
@@ -135,6 +222,28 @@ func (e editor) Update(msg tea.Msg) (editor, tea.Cmd) {
 }
 
 func (e editor) updateKey(msg tea.KeyMsg) (editor, tea.Cmd) {
+	// Export prompt owns keys while active.
+	if e.exporting {
+		switch msg.String() {
+		case "esc":
+			e.exporting = false
+			e.exportPath.Blur()
+			e.exportMsg = "export cancelled"
+			return e, nil
+		case "ctrl+t":
+			e.toggleExportFormat()
+			return e, nil
+		case "enter":
+			e.exportMsg = e.performExport()
+			e.exporting = false
+			e.exportPath.Blur()
+			return e, nil
+		}
+		var cmd tea.Cmd
+		e.exportPath, cmd = e.exportPath.Update(msg)
+		return e, cmd
+	}
+
 	switch msg.String() {
 	case "ctrl+r":
 		sql := strings.TrimSpace(e.area.Value())
@@ -144,6 +253,14 @@ func (e editor) updateKey(msg tea.KeyMsg) (editor, tea.Cmd) {
 		e.running = true
 		e.err = ""
 		return e, runCmd(e.conn, sql)
+
+	case "ctrl+e":
+		// Open the export prompt (only meaningful with a row set).
+		e.openExport()
+		if e.exporting {
+			return e, textinput.Blink
+		}
+		return e, nil
 
 	case "tab":
 		// Toggle focus between editor and results.
@@ -286,6 +403,12 @@ func (e editor) View() string {
 	switch {
 	case e.running:
 		b.WriteString(paneHintStyle.Render("running…"))
+	case e.exportMsg != "":
+		st := editorOKStyle
+		if strings.HasPrefix(e.exportMsg, "✗") || e.exportMsg == "export cancelled" || e.exportMsg == "nothing to export" {
+			st = editorErrStyle
+		}
+		b.WriteString(st.Render(truncateToWidth(e.exportMsg, max1(e.width-2))))
 	case e.err != "":
 		b.WriteString(editorErrStyle.Render("✗ " + truncateToWidth(e.err, max1(e.width-2))))
 	case e.res != nil:
@@ -294,6 +417,19 @@ func (e editor) View() string {
 		b.WriteString(paneHintStyle.Render("ready"))
 	}
 	b.WriteString("\n")
+
+	// Export prompt (modal-ish line above the results).
+	if e.exporting {
+		b.WriteString(metSectionStyle.Render("Export"))
+		b.WriteString("  ")
+		b.WriteString(paneHintStyle.Render("format: "))
+		b.WriteString(editorOKStyle.Render(string(e.exportFmt)))
+		b.WriteString("\n")
+		b.WriteString(e.exportPath.View())
+		b.WriteString("\n")
+		b.WriteString(helpStyle.Render("enter write · ctrl+t toggle csv/json · esc cancel"))
+		b.WriteString("\n")
+	}
 
 	// Results pane.
 	if e.res != nil && e.res.IsRowSet() {
@@ -328,9 +464,9 @@ func (e editor) footer() string {
 	}
 	hints := []keyHint{
 		{"ctrl+r", "run"},
+		{"ctrl+e", "export"},
 		{"tab", "pane"},
 		{"↑↓", "rows"},
-		{"←→", "cols"},
 		{"esc", "back"},
 	}
 	return footerBar(e.width, ctx, hints)
