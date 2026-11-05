@@ -19,6 +19,7 @@ const (
 	screenManager screen = iota
 	screenConnecting
 	screenBrowser
+	screenEditor
 )
 
 // --- lifecycle messages ---
@@ -35,6 +36,7 @@ type Model struct {
 	screen  screen
 	manager manager
 	browser browser
+	editor  editor
 
 	// conn is the live connection while browsing; nil otherwise.
 	conn     *pgx.Conn
@@ -93,6 +95,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.manager, cmd = m.manager.Update(msg)
 		b, _ := m.browser.Update(msg)
 		m.browser = b
+		ed, _ := m.editor.Update(msg)
+		m.editor = ed
 		return m, cmd
 
 	case connectedMsg:
@@ -124,6 +128,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case screenBrowser:
 		var cmd tea.Cmd
 		m.browser, cmd = m.browser.Update(msg)
+		return m, cmd
+	case screenEditor:
+		var cmd tea.Cmd
+		m.editor, cmd = m.editor.Update(msg)
 		return m, cmd
 	default:
 		var cmd tea.Cmd
@@ -158,8 +166,26 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.closeConn()
 			return m, tea.Quit
 		}
+		// 'e' opens the query editor on the live connection.
+		if msg.String() == "e" {
+			m.editor = newEditor(m.conn)
+			m.editor.setSize(m.width, m.height-1)
+			m.screen = screenEditor
+			return m, textareaBlinkCmd()
+		}
 		var cmd tea.Cmd
 		m.browser, cmd = m.browser.Update(msg)
+		return m, cmd
+
+	case screenEditor:
+		// esc returns to the browser; the editor owns every other key
+		// (including 'q'/'b' which are valid SQL text).
+		if msg.String() == "esc" {
+			m.screen = screenBrowser
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.editor, cmd = m.editor.Update(msg)
 		return m, cmd
 
 	case screenConnecting:
@@ -204,6 +230,10 @@ func (m Model) View() string {
 	case screenBrowser:
 		header := headerStyle.Render("🐘 tusk — " + m.connName)
 		return lipgloss.JoinVertical(lipgloss.Left, header, m.browser.View())
+
+	case screenEditor:
+		header := headerStyle.Render("🐘 tusk — " + m.connName + " · query")
+		return lipgloss.JoinVertical(lipgloss.Left, header, m.editor.View())
 
 	default: // screenManager
 		header := headerStyle.Render("🐘 tusk")

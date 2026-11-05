@@ -14,7 +14,11 @@ A running list of features. Keep adding as ideas come up. Status key:
   - Keyboard nav; `r` refresh, `b` back to connections.
   - [x] Fuzzy text search (`/`) over loaded schema & table/view names
     (no columns); auto-shows schemas with matching children; `esc` clears.
-- [ ] **Query editor** — multi-line SQL input with run (Ctrl+Enter).
+- [x] **Query editor** — multi-line SQL input (textarea) run with `Ctrl+R`
+  (terminals can't reliably detect Ctrl+Enter). Opens from the browser with
+  `e`; `tab` switches editor/results panes; shows a basic scrollable results
+  table, command tag for non-SELECTs, timing, and errors. A richer grid is the
+  next item.
 - [ ] **Results grid** — scrollable, virtualized table of query results.
 - [ ] **Export results** — CSV / JSON.
 
