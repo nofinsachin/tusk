@@ -9,7 +9,9 @@ A running list of features. Keep adding as ideas come up. Status key:
   - Store metadata in `~/.config/tusk/connections.yml`.
   - Never store passwords; resolve via `PGPASSWORD`, `~/.pgpass`, or an
     in-TUI masked prompt (shown only when no password is otherwise available).
-- [ ] **Schema browser** — tree of databases → schemas → tables/views → columns.
+- [x] **Schema browser** — collapsible tree of schemas → tables/views → columns.
+  - Lazy-loads children; columns show type and nullability.
+  - Keyboard nav; `r` refresh, `b` back to connections.
 - [ ] **Query editor** — multi-line SQL input with run (Ctrl+Enter).
 - [ ] **Results grid** — scrollable, virtualized table of query results.
 - [ ] **Export results** — CSV / JSON.

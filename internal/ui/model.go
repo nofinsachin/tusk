@@ -2,19 +2,44 @@
 package ui
 
 import (
+	"context"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/nofinsachin/tusk/internal/config"
+	"github.com/nofinsachin/tusk/internal/db"
 )
+
+// screen identifies which top-level view is active.
+type screen int
+
+const (
+	screenManager screen = iota
+	screenConnecting
+	screenBrowser
+)
+
+// --- lifecycle messages ---
+
+// connOpenedMsg reports the result of opening a live connection.
+type connOpenedMsg struct {
+	conn *pgx.Conn
+	name string
+	err  error
+}
 
 // Model is the root application model.
 type Model struct {
+	screen  screen
 	manager manager
+	browser browser
 
-	// connected holds the connection chosen via the manager. Browsing/query
-	// screens will hang off this in later milestones.
-	connected *config.Connection
+	// conn is the live connection while browsing; nil otherwise.
+	conn     *pgx.Conn
+	connName string
+	connErr  string
 
 	loadErr error
 	width   int
@@ -26,10 +51,10 @@ type Model struct {
 func New() Model {
 	store, err := config.Load()
 	if err != nil {
-		// Start with an empty store but surface the error in the UI.
 		store = &config.Store{}
 	}
 	return Model{
+		screen:  screenManager,
 		manager: newManager(store),
 		loadErr: err,
 	}
@@ -40,6 +65,22 @@ func (m Model) Init() tea.Cmd {
 	return nil
 }
 
+// openConnCmd opens a live connection off the UI goroutine.
+func openConnCmd(c config.Connection, password string) tea.Cmd {
+	return func() tea.Msg {
+		conn, err := db.Connect(context.Background(), c, password)
+		return connOpenedMsg{conn: conn, name: c.Name, err: err}
+	}
+}
+
+// closeConn closes any live connection, returning to a clean state.
+func (m *Model) closeConn() {
+	if m.conn != nil {
+		_ = m.conn.Close(context.Background())
+		m.conn = nil
+	}
+}
+
 // Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -47,32 +88,92 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.ready = true
+		// Propagate to whichever screens exist.
 		var cmd tea.Cmd
 		m.manager, cmd = m.manager.Update(msg)
+		b, _ := m.browser.Update(msg)
+		m.browser = b
 		return m, cmd
 
 	case connectedMsg:
-		c := msg.conn
-		m.connected = &c
-		return m, nil
+		// User chose a connection in the manager. Begin opening it.
+		m.screen = screenConnecting
+		m.connName = msg.conn.Name
+		m.connErr = ""
+		return m, openConnCmd(msg.conn, msg.password)
+
+	case connOpenedMsg:
+		if msg.err != nil {
+			m.connErr = msg.err.Error()
+			m.screen = screenManager
+			return m, nil
+		}
+		m.conn = msg.conn
+		m.connName = msg.name
+		m.browser = newBrowser(msg.conn, msg.name)
+		m.browser.setSize(m.width, m.height-1)
+		m.screen = screenBrowser
+		return m, m.browser.init()
 
 	case tea.KeyMsg:
-		// Global quit only when on the list (not capturing text in the form or
-		// password prompt, and not filtering).
-		if m.manager.mode == modeList &&
-			m.manager.list.FilterState().String() != "filtering" {
-			switch msg.String() {
-			case "q", "ctrl+c":
-				return m, tea.Quit
-			}
-		} else if msg.String() == "ctrl+c" {
-			return m, tea.Quit
-		}
+		return m.handleKey(msg)
 	}
 
-	var cmd tea.Cmd
-	m.manager, cmd = m.manager.Update(msg)
-	return m, cmd
+	// Route other messages to the active screen.
+	switch m.screen {
+	case screenBrowser:
+		var cmd tea.Cmd
+		m.browser, cmd = m.browser.Update(msg)
+		return m, cmd
+	default:
+		var cmd tea.Cmd
+		m.manager, cmd = m.manager.Update(msg)
+		return m, cmd
+	}
+}
+
+func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// ctrl+c always quits, closing any live connection first.
+	if msg.String() == "ctrl+c" {
+		m.closeConn()
+		return m, tea.Quit
+	}
+
+	switch m.screen {
+	case screenBrowser:
+		// 'b' returns to the connection manager, closing the connection.
+		if msg.String() == "b" {
+			m.closeConn()
+			m.screen = screenManager
+			return m, nil
+		}
+		if msg.String() == "q" {
+			m.closeConn()
+			return m, tea.Quit
+		}
+		var cmd tea.Cmd
+		m.browser, cmd = m.browser.Update(msg)
+		return m, cmd
+
+	case screenConnecting:
+		// Allow aborting a hanging connect attempt.
+		if msg.String() == "esc" {
+			m.screen = screenManager
+			return m, nil
+		}
+		return m, nil
+
+	default: // screenManager
+		if m.manager.mode == modeList &&
+			m.manager.list.FilterState().String() != "filtering" {
+			if msg.String() == "q" {
+				return m, tea.Quit
+			}
+		}
+		var cmd tea.Cmd
+		m.manager, cmd = m.manager.Update(msg)
+		return m, cmd
+	}
 }
 
 var headerStyle = lipgloss.NewStyle().
@@ -87,15 +188,25 @@ func (m Model) View() string {
 		return "Loading tusk…"
 	}
 
-	header := headerStyle.Render("🐘 tusk")
-	if m.connected != nil {
-		header = headerStyle.Render("🐘 tusk — " + m.connected.Name)
-	}
+	switch m.screen {
+	case screenConnecting:
+		header := headerStyle.Render("🐘 tusk")
+		return lipgloss.JoinVertical(lipgloss.Left,
+			header, "\nConnecting to "+m.connName+"…  (esc to cancel)")
 
-	var banner string
-	if m.loadErr != nil {
-		banner = errStyle.Render("config load error: "+m.loadErr.Error()) + "\n"
-	}
+	case screenBrowser:
+		header := headerStyle.Render("🐘 tusk — " + m.connName)
+		return lipgloss.JoinVertical(lipgloss.Left, header, m.browser.View())
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, banner+m.manager.View())
+	default: // screenManager
+		header := headerStyle.Render("🐘 tusk")
+		var banner string
+		if m.loadErr != nil {
+			banner = errStyle.Render("config load error: "+m.loadErr.Error()) + "\n"
+		}
+		if m.connErr != "" {
+			banner += errStyle.Render("connect error: "+m.connErr) + "\n"
+		}
+		return lipgloss.JoinVertical(lipgloss.Left, header, banner+m.manager.View())
+	}
 }
